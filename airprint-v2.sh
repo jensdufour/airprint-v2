@@ -62,15 +62,19 @@ need_cmd pvesm
 # walking the user through the full wizard again. This is the community-scripts.org
 # pattern: "re-run the same one-liner to update".
 detect_airprint_cts() {
-  local ctid
+  local ctid tags t
   while read -r ctid; do
     [[ -z "$ctid" ]] && continue
-    if pct config "$ctid" 2>/dev/null \
-        | awk -F': *' '/^tags:/ {print $2}' \
-        | tr ';,' '\n\n' \
-        | grep -qx airprint; then
-      printf '%s\n' "$ctid"
-    fi
+    tags="$(pct config "$ctid" 2>/dev/null | awk -F': *' '/^tags:/ {print $2}')"
+    [[ -z "$tags" ]] && continue
+    # Tags are separated by ';' or ',' depending on Proxmox version.
+    IFS=',;' read -ra __tagarr <<<"$tags"
+    for t in "${__tagarr[@]}"; do
+      if [[ "$t" == "airprint" ]]; then
+        printf '%s\n' "$ctid"
+        break
+      fi
+    done
   done < <(pct list 2>/dev/null | awk 'NR>1 {print $1}')
 }
 
