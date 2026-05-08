@@ -27,18 +27,25 @@ URI="socket://${AIRPRINT_PRINTER_IP}:9100"
 
 # Pick the best PPD we can find.
 pick_ppd() {
-  local candidates=(
-    # UFR II driver paths (set up by canon-ufr2-install.sh).
-    /opt/cel/ppd/CNCUPSIR1133ZK.ppd
-    /opt/cel/ppd/CNCUPSIR1133.ppd
-    /usr/share/ppd/canon/CNCUPSIR1133ZK.ppd
-    /usr/share/ppd/canon/CNCUPSIR1133.ppd
+  # 1. UFR II driver paths laid down by canon-ufr2-install.sh. The PPD
+  #    filename varies by tarball locale (CNCUPSIR1133ZK.ppd is common, but
+  #    m17n bundles ship CNCUPSIR1133*US.ppd, etc.) — glob to be tolerant.
+  local ppd_dirs=(
+    /opt/cel/ppd
+    /opt/cel/share/ppd
+    /usr/share/ppd/canon
+    /usr/share/ppd/Canon
+    /usr/share/cups/model
   )
-  for c in "${candidates[@]}"; do
-    [[ -r "$c" ]] && { printf 'file://%s' "$c"; return; }
+  for d in "${ppd_dirs[@]}"; do
+    [[ -d "$d" ]] || continue
+    # shellcheck disable=SC2231
+    for c in "$d"/CNCUPSIR1133*.ppd; do
+      [[ -r "$c" ]] && { printf 'file://%s' "$c"; return; }
+    done
   done
 
-  # Try foomatic / cups-driverd to find a Canon iR PPD.
+  # 2. Try foomatic / cups-driverd to find a Canon iR PPD.
   local match
   match="$(lpinfo -m 2>/dev/null | awk '/[Cc]anon.*iR.*1133/ {print $1; exit}')" || true
   if [[ -n "${match:-}" ]]; then
@@ -46,7 +53,7 @@ pick_ppd() {
     return
   fi
 
-  # Generic PostScript fallback.
+  # 3. Generic PostScript fallback.
   match="$(lpinfo -m 2>/dev/null | awk '/[Pp]ost[Ss]cript.*generic/ {print $1; exit}')" || true
   if [[ -n "${match:-}" ]]; then
     warn "no Canon-specific PPD found — using generic PostScript"

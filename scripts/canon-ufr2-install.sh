@@ -2,17 +2,19 @@
 # scripts/canon-ufr2-install.sh — Canon UFR II Linux driver helper.
 #
 # Canon ships UFR II for Linux as a tarball that requires accepting their
-# EULA. We can't redistribute it. This script handles three sources, in
-# priority order:
+# EULA. We can't redistribute it, but Canon's downloads are open URLs, so
+# this script defaults to fetching the v6.30 m17n release directly. Sources,
+# in priority order:
 #   1. A tarball already present at /opt/airprint-v2/drivers/canon-ufr2.tar.gz
-#   2. A URL provided via the CANON_UFR2_URL env var.
-#   3. None — exit 0 with a warning so install.sh can fall back to a
-#      generic PostScript / driverless PPD.
+#      (drop one in there if you want to pin a specific version offline).
+#   2. The URL in CANON_UFR2_URL — defaults to Canon's v6.30 m17n release.
+#   3. Nothing fetched / nothing installable — exit 0 with a warning so
+#      install.sh can fall back to generic driverless PPDs.
 #
-# The tarball layout has changed over the years; the script tries the two
-# common patterns:
-#   * `linux-UFRII-drv-vXXX-uken-*/` containing a `Debian/` folder of .debs.
-#   * A flat directory with `cndrvcups-common_*.deb` + `cndrvcups-ufr2-*.deb`.
+# Tarball layouts handled:
+#   * m17n (v6.x): `linux-UFRII-drv-vXXX-m17n-NN/{32,64}-bit_Driver/Debian/*.deb`
+#   * uken (v5.x and earlier): `linux-UFRII-drv-vXXX-uken-NN/Debian/*.deb`
+#   * Anything else with cndrvcups-{common,ufr2}*.deb files anywhere inside.
 # shellcheck shell=bash
 set -o errexit -o nounset -o pipefail
 
@@ -21,6 +23,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/lib/common.sh"
 
 require_root
+
+# Canon's v6.30 m17n release — the latest Linux UFR II that supports the
+# imageRUNNER 1133/1133A. Override CANON_UFR2_URL to pin a different version.
+: "${CANON_UFR2_URL:=https://gdlp01.c-wss.com/gds/8/0100007658/48/linux-UFRII-drv-v630-m17n-07.tar.gz}"
 
 DRIVERS_DIR="$ROOT/drivers"
 LOCAL_TARBALL="$DRIVERS_DIR/canon-ufr2.tar.gz"
@@ -40,10 +46,17 @@ if [[ -f "$LOCAL_TARBALL" ]]; then
   TARBALL="$LOCAL_TARBALL"
   log "using local Canon driver tarball: $TARBALL"
 elif [[ -n "${CANON_UFR2_URL:-}" ]]; then
-  log "downloading Canon driver from CANON_UFR2_URL"
+  log "downloading Canon driver from $CANON_UFR2_URL"
   TARBALL="$WORKDIR/canon-ufr2.tar.gz"
-  curl -fsSL --retry 3 "$CANON_UFR2_URL" -o "$TARBALL" \
-    || { warn "download failed — skipping Canon driver"; exit 0; }
+  if ! curl -fsSL --retry 3 "$CANON_UFR2_URL" -o "$TARBALL"; then
+    warn "download failed — skipping Canon driver"
+    warn "  set CANON_UFR2_URL=<url> or drop a tarball at $LOCAL_TARBALL"
+    exit 0
+  fi
+  if [[ ! -s "$TARBALL" ]]; then
+    warn "downloaded tarball is empty — skipping Canon driver"
+    exit 0
+  fi
 else
   warn "no Canon UFR II driver source provided"
   warn "  -> place the tarball at: $LOCAL_TARBALL"
@@ -55,19 +68,21 @@ fi
 log "extracting Canon driver tarball"
 tar -xf "$TARBALL" -C "$WORKDIR"
 
-# Find a Debian package directory inside the tree.
-# `-print -quit` stops `find` after the first match without SIGPIPE.
-DEB_DIR="$(find "$WORKDIR" -type d -iname 'Debian' -print -quit)"
-if [[ -z "$DEB_DIR" ]]; then
-  DEB_DIR="$(find "$WORKDIR" -type d \( -iname '*deb*' -o -iname 'amd64' \) -print -quit)"
-fi
-if [[ -z "$DEB_DIR" ]]; then
-  # Maybe the .debs are scattered.
-  DEB_DIR="$WORKDIR"
+# Find amd64 cndrvcups-{common,ufr2} .debs anywhere in the unpacked tree.
+# m17n tarballs ship both 32-bit_Driver/Debian/ and 64-bit_Driver/Debian/ —
+# requiring _amd64.deb in the name avoids picking up the i386 packages.
+mapfile -t DEBS < <(find "$WORKDIR" -type f \
+  \( -name 'cndrvcups-common*amd64.deb' \
+     -o -name 'cndrvcups-ufr2*amd64.deb' \) | sort)
+
+# Older single-arch tarballs don't tag the deb filename with arch — try those.
+if (( ${#DEBS[@]} == 0 )); then
+  mapfile -t DEBS < <(find "$WORKDIR" -type f \
+    \( -name 'cndrvcups-common*.deb' \
+       -o -name 'cndrvcups-ufr2*.deb' \) \
+    ! -name '*i386*' ! -name '*armhf*' ! -name '*arm64*' | sort)
 fi
 
-mapfile -t DEBS < <(find "$DEB_DIR" -maxdepth 3 -type f -name '*.deb' \
-                    -regex '.*\(cndrvcups-common\|cndrvcups-ufr2\).*' | sort)
 if (( ${#DEBS[@]} == 0 )); then
   warn "no cndrvcups-* .deb packages found inside the tarball"
   warn "tarball contents (top 50 entries):"
@@ -92,19 +107,26 @@ if ! apt-get install -y --no-install-recommends "${DEBS[@]}" 2>/dev/null; then
   apt-get install -y --fix-broken
 fi
 
-# The Canon installer drops PPDs under /opt/cel/share/ppd/ on some versions;
-# symlink them into /usr/share/ppd/canon/ so lpinfo -m can see them.
+# The Canon installer drops PPDs in different places depending on the
+# version: /opt/cel/share/ppd/, /opt/cel/ppd/, or /usr/share/cups/model/.
+# Symlink anything matching the imageRUNNER 1133 family into
+# /usr/share/ppd/canon/ so cups-driverd / lpinfo -m surfaces them.
 mkdir -p /usr/share/ppd/canon
-for src in /opt/cel/share/ppd /opt/cel/ppd /usr/share/cups/model; do
+for src in /opt/cel/share/ppd /opt/cel/ppd /usr/share/cups/model /usr/share/ppd; do
   [[ -d "$src" ]] || continue
-  for ppd in "$src"/CNCUPSIR1133*.ppd; do
+  while IFS= read -r ppd; do
     [[ -f "$ppd" ]] || continue
     ln -sf "$ppd" "/usr/share/ppd/canon/$(basename "$ppd")"
-  done
+  done < <(find "$src" -maxdepth 4 -type f -iname 'CNCUPSIR1133*.ppd' 2>/dev/null)
 done
 
 # Make sure ccpd / cnsetuputil2 helper services don't run — we only need the
 # CUPS filter components for network printing.
 systemctl disable --now ccpd 2>/dev/null || true
+
+# Refresh CUPS so cups-driverd indexes the new Canon PPDs before add-printer.sh
+# runs.
+systemctl reload-or-restart cups 2>/dev/null || true
+sleep 1
 
 ok "Canon UFR II driver installed"
