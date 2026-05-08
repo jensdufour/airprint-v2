@@ -74,7 +74,9 @@ if pgrep -af agetty 2>/dev/null | grep -vq -- '--autologin'; then
   # shellcheck disable=SC2009
   ps -eo pid,cmd | awk '/agetty/ && !/--autologin/ && !/awk/ {print $1}' \
     | while read -r pid; do
-        [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+        if [[ -n "$pid" ]]; then
+          kill "$pid" 2>/dev/null || true
+        fi
       done
   # Give systemd a moment to respawn the unit with the new ExecStart.
   sleep 1
