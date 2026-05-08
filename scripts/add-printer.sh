@@ -80,28 +80,22 @@ cupsenable "$AIRPRINT_QUEUE_NAME"
 cupsaccept "$AIRPRINT_QUEUE_NAME"
 lpadmin -d "$AIRPRINT_QUEUE_NAME"
 
-# Patch the generated PPD with AirPrint / IPP / SNMP hints — but ONLY if they
-# are missing (modern Canon/HP PPDs already declare these). We deliberately
-# DO NOT touch *cupsFilter2: a wrong value silently kills printing.
-#
-# What each line means:
-#   *cupsURF       — declares URF (Apple Raster) support. Without this iOS
-#                    sometimes greys out the Print button. The value below is
-#                    the conservative monochrome-greyscale baseline that any
-#                    laser printer can satisfy via cupsfilters' rasteriser.
-#   *cupsIPPSupplies / *cupsSNMPSupplies — let CUPS poll toner level via SNMP
-#                    and surface it on iOS / macOS print dialogs.
-#   *cupsManualCopies — CUPS handles copies in software (Canon UFR II prefers).
-#   *cupsFax       — explicitly off; no fax queue.
+# Patch the generated PPD with SNMP / IPP-supplies hints — but ONLY if missing
+# and ONLY for inert, well-supported attributes. We deliberately do NOT touch
+# *cupsURF here unless explicitly asked: declaring URF capabilities the filter
+# chain can't actually produce makes iOS silently refuse to select the
+# printer (taps don't apply). Set AIRPRINT_PATCH_URF=1 to opt in.
 PPD_FILE="/etc/cups/ppd/${AIRPRINT_QUEUE_NAME}.ppd"
 if [[ -f "$PPD_FILE" ]]; then
   declare -A want=(
-    [cupsURF]='*cupsURF: "RS300,W8,SRGB24"'
     [cupsIPPSupplies]='*cupsIPPSupplies: True'
     [cupsSNMPSupplies]='*cupsSNMPSupplies: True'
-    [cupsManualCopies]='*cupsManualCopies: True'
-    [cupsFax]='*cupsFax: False'
   )
+  if [[ "${AIRPRINT_PATCH_URF:-0}" == "1" ]]; then
+    # Conservative, broadly-producible URF baseline; only touch this if the
+    # default driverless detection doesn't already publish a URF= TXT record.
+    want[cupsURF]='*cupsURF: "V1.4,DM1,RS300"'
+  fi
   patched=0
   for key in "${!want[@]}"; do
     if ! grep -qE "^\*${key}:" "$PPD_FILE"; then
@@ -110,7 +104,7 @@ if [[ -f "$PPD_FILE" ]]; then
     fi
   done
   if (( patched > 0 )); then
-    log "patched $patched AirPrint/SNMP attribute(s) into PPD"
+    log "patched $patched supplies-related attribute(s) into PPD"
   fi
 fi
 

@@ -118,7 +118,11 @@ EOF
 chmod 0644 /etc/cron.d/airprint-healthcheck
 ok "healthcheck installed"
 
-# ---- 9. summary ------------------------------------------------------------
+# ---- 9. console autologin --------------------------------------------------
+log "enabling root autologin on the LXC console (Proxmox web UI)"
+"$ROOT/scripts/console-autologin.sh" || warn "console autologin step failed"
+
+# ---- 10. summary -----------------------------------------------------------
 ip4="$(ip -4 -o addr show dev eth0 | awk '{print $4}' | cut -d/ -f1 || true)"
 printf '\n%s== airprint-v2 inside-container install complete ==%s\n' "$C_BOLD" "$C_RESET"
 printf '  hostname  : %s\n'   "$(hostname)"

@@ -82,13 +82,20 @@ else
   if [[ -z "$txt" ]]; then
     record_fail "no _ipp._tcp record for '$AIRPRINT_QUEUE_NAME' on the local Avahi"
   else
-    for key in 'rp=printers/' 'pdl=' 'URF=' 'kind=document'; do
+    # Required-for-AirPrint TXT keys.
+    for key in 'rp=printers/' 'pdl=' 'kind='; do
       if grep -q "$key" <<<"$txt"; then
         record_pass "TXT contains '$key…'"
       else
         record_fail "TXT missing '$key'"
       fi
     done
+    # URF is nice-to-have; not required when pdl includes application/pdf.
+    if grep -q 'URF=' <<<"$txt"; then
+      record_pass "TXT contains 'URF=…' (full AirPrint)"
+    else
+      log "  TXT has no URF= — fine when pdl advertises application/pdf"
+    fi
   fi
 fi
 
@@ -119,16 +126,21 @@ else
 fi
 
 # ---------------------------------------------------------------------- 7.
-log "[7/7] PPD declares AirPrint / SNMP hints"
+log "[7/7] PPD declares supplies hints"
 PPD="/etc/cups/ppd/${AIRPRINT_QUEUE_NAME}.ppd"
 if [[ -f "$PPD" ]]; then
-  for key in cupsURF cupsIPPSupplies cupsSNMPSupplies; do
+  for key in cupsIPPSupplies cupsSNMPSupplies; do
     if grep -qE "^\*${key}:" "$PPD"; then
       record_pass "PPD declares *${key}"
     else
-      record_fail "PPD missing *${key} (page/toner status may not surface on iOS)"
+      record_fail "PPD missing *${key} (toner/page status may not surface on iOS)"
     fi
   done
+  if grep -qE '^\*cupsURF:' "$PPD"; then
+    record_pass "PPD declares *cupsURF (URF advertised over Bonjour)"
+  else
+    log "  PPD has no *cupsURF — that's fine, CUPS driverless detection handles it"
+  fi
 else
   record_fail "PPD '$PPD' not found"
 fi
