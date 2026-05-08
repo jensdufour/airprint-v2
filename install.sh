@@ -161,20 +161,48 @@ else
 fi
 
 # ---- 7b. CUPS reachability check ------------------------------------------
-# After cups+ufw are settled, verify the daemon is actually bound to *:631 and
-# answering HTTP. This catches misconfigurations early rather than letting the
-# user discover them by hitting a dead URL.
-log "verifying CUPS web UI is reachable on http://localhost:631/"
-if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE '(^|:)\*?:?631$|0\.0\.0\.0:631$'; then
-  ok "cupsd is listening on *:631"
+# After cups+ufw are settled, verify the daemon is actually bound to the
+# *external* interface (not just loopback) and answering HTTP. This catches
+# misconfigurations early rather than letting the user discover them by
+# hitting a dead URL or watching iOS "select printer" silently fail.
+log "verifying CUPS web UI is reachable on http://0.0.0.0:631/"
+
+# Pull the listener list once. We're looking for an LISTEN socket bound to
+# something OTHER than a loopback address (127.x.x.x / ::1).
+listeners="$(ss -Hltn 2>/dev/null | awk '{print $4}' || true)"
+if printf '%s\n' "$listeners" | grep -qE '^(0\.0\.0\.0|\*|\[::\]):631$'; then
+  ok "cupsd is listening on a wildcard / non-loopback :631 (LAN-reachable)"
+elif printf '%s\n' "$listeners" | grep -qE ':631$'; then
+  warn "cupsd is bound to :631 but ONLY on loopback — LAN clients (iOS, browser) will get ECONNREFUSED"
+  printf '%s\n' "$listeners" | sed 's/^/    /'
+  warn "forcing a cups restart with explicit Listen 0.0.0.0:631 from cupsd.conf"
+  systemctl stop cups cups.socket 2>/dev/null || true
+  systemctl start cups
+  sleep 1
 else
-  warn "cupsd is NOT listening on *:631 — check /etc/cups/cupsd.conf"
-  ss -ltn 2>/dev/null | sed 's/^/    /'
+  warn "cupsd is NOT listening on :631 at all — check /etc/cups/cupsd.conf and journalctl -u cups -n 50"
+  printf '%s\n' "$listeners" | sed 's/^/    /'
 fi
+
+# Probe loopback first (fast smoke check that cupsd answers HTTP at all).
 if curl -fsSI --max-time 4 http://localhost:631/ >/dev/null 2>&1; then
   ok "http://localhost:631/ responds"
 else
   warn "http://localhost:631/ did NOT respond — see 'journalctl -u cups -n 30'"
+fi
+
+# Probe the LAN interface from inside the CT — same path the iPhone takes.
+# If this fails but localhost works, cupsd is loopback-only and iOS will
+# silently fail to apply the printer selection.
+ext_ip="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)"
+if [[ -n "$ext_ip" ]]; then
+  if curl -fsSI --max-time 4 "http://${ext_ip}:631/" >/dev/null 2>&1; then
+    ok "http://${ext_ip}:631/ responds (LAN reachable — iOS will be able to query the queue)"
+  else
+    warn "http://${ext_ip}:631/ did NOT respond — LAN clients will see ECONNREFUSED."
+    warn "  This will also break the iOS Print sheet's 'select printer' step."
+    warn "  Try:  systemctl restart cups  ; ss -ltnp | grep 631"
+  fi
 fi
 
 # ---- 8. healthcheck cron ---------------------------------------------------
