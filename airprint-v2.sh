@@ -21,7 +21,11 @@
 : "${AIRPRINT_REPO_RAW:=https://raw.githubusercontent.com/jensdufour/airprint-v2/${AIRPRINT_REPO_BRANCH}}"
 
 # ---- bootstrap: source common.sh whether running locally or via curl-bash --
-__self_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+if __self_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"; then
+  :
+else
+  __self_dir=""
+fi
 if [[ -n "$__self_dir" && -f "$__self_dir/lib/common.sh" ]]; then
   # Running from a local checkout.
   # shellcheck source=lib/common.sh

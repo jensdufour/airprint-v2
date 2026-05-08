@@ -48,7 +48,8 @@ fi
 # 3. Probe.
 log "probing for scanners (this can take ~10s)…"
 SCAN_OUT="$(scanimage -L 2>&1 || true)"
-echo "$SCAN_OUT" | sed 's/^/    /'
+# Indent each line by 4 spaces (no spawn — pure bash parameter expansion).
+printf '    %s\n' "${SCAN_OUT//$'\n'/$'\n    '}"
 
 if echo "$SCAN_OUT" | grep -qiE 'canon|airscan|escl'; then
   ok "scanner detected via SANE — enabling AirScan publishing"
