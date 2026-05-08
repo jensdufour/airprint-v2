@@ -31,8 +31,15 @@ pick_ppd() {
   #    filename varies by tarball locale (CNCUPSIR1133ZK.ppd is common, but
   #    m17n bundles ship CNCUPSIR1133*US.ppd, etc.) — glob to be tolerant.
   local ppd_dirs=(
+    # uken / pre-v6.x layout
     /opt/cel/ppd
     /opt/cel/share/ppd
+    # m17n v6.x layout — packages install under /opt/cnrdrvcups-*
+    /opt/cnrdrvcups-ufr2/data/ppd
+    /opt/cnrdrvcups-ufr2/share/ppd
+    /opt/cnrdrvcups-ufr2-uk/data/ppd
+    /opt/cnrdrvcups-ufr2-us/data/ppd
+    # symlinks our installer drops here, plus distro defaults
     /usr/share/ppd/canon
     /usr/share/ppd/Canon
     /usr/share/cups/model
