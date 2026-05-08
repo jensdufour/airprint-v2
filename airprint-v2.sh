@@ -56,6 +56,97 @@ need_cmd pveam
 need_cmd pvesm
 [[ -f /etc/pve/.version ]] || warn "no /etc/pve/.version — are you sure this is a Proxmox node?"
 
+# ---- detect existing airprint container -----------------------------------
+# Look for any CT tagged 'airprint' (we tag every CT we create — see `pct create`
+# below). If found, default to running the in-container updater rather than
+# walking the user through the full wizard again. This is the community-scripts.org
+# pattern: "re-run the same one-liner to update".
+detect_airprint_cts() {
+  local ctid
+  while read -r ctid; do
+    [[ -z "$ctid" ]] && continue
+    if pct config "$ctid" 2>/dev/null \
+        | awk -F': *' '/^tags:/ {print $2}' \
+        | tr ';,' '\n\n' \
+        | grep -qx airprint; then
+      printf '%s\n' "$ctid"
+    fi
+  done < <(pct list 2>/dev/null | awk 'NR>1 {print $1}')
+}
+
+AIRPRINT_UPDATE_ONLY=0
+if [[ "${AIRPRINT_FORCE_NEW:-0}" != "1" ]]; then
+  mapfile -t __existing_cts < <(detect_airprint_cts)
+  if (( ${#__existing_cts[@]} > 0 )); then
+    printf '\n%sExisting airprint container(s) detected:%s\n' "$C_BOLD" "$C_RESET" >&2
+    for c in "${__existing_cts[@]}"; do
+      __name="$(pct config "$c" 2>/dev/null | awk -F': *' '/^hostname:/ {print $2}')"
+      __status="$(pct status "$c" 2>/dev/null | awk '{print $2}')"
+      printf '  CT %s  hostname=%s  status=%s\n' "$c" "${__name:-?}" "${__status:-?}" >&2
+    done
+    if (( ${#__existing_cts[@]} == 1 )); then
+      AIRPRINT_CTID="${__existing_cts[0]}"
+      if confirm "Update existing airprint CT $AIRPRINT_CTID instead of creating a new one?" "y"; then
+        AIRPRINT_UPDATE_ONLY=1
+      fi
+    else
+      ask "Which CTID do you want to update? (blank = create a new one)" "" __pick
+      if [[ -n "${__pick:-}" ]]; then
+        AIRPRINT_CTID="$__pick"
+        AIRPRINT_UPDATE_ONLY=1
+      fi
+    fi
+  fi
+fi
+
+# ---- update-only fast path ------------------------------------------------
+run_update_only() {
+  log "update mode — refreshing CT $AIRPRINT_CTID in-place"
+  if ! pct status "$AIRPRINT_CTID" 2>/dev/null | grep -q running; then
+    log "starting CT $AIRPRINT_CTID"
+    pct start "$AIRPRINT_CTID"
+    sleep 2
+  fi
+  # Wait for network so apt/git can fetch.
+  for _ in $(seq 1 30); do
+    if pct exec "$AIRPRINT_CTID" -- sh -c 'getent hosts github.com >/dev/null 2>&1'; then
+      break
+    fi
+    sleep 2
+  done
+
+  if pct exec "$AIRPRINT_CTID" -- test -x /usr/local/sbin/airprint-update 2>/dev/null; then
+    log "airprint-update is already installed inside CT — running it"
+    pct exec "$AIRPRINT_CTID" -- /usr/local/sbin/airprint-update --branch "$AIRPRINT_REPO_BRANCH"
+  else
+    log "airprint-update not present (older install) — bootstrapping the new updater"
+    pct exec "$AIRPRINT_CTID" -- bash -c "
+      set -e
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq
+      apt-get install -y --no-install-recommends git ca-certificates curl >/dev/null
+      rm -rf /opt/airprint-v2
+      git clone --depth 1 --branch '$AIRPRINT_REPO_BRANCH' '$AIRPRINT_REPO_URL' /opt/airprint-v2
+      find /opt/airprint-v2 -type f -name '*.sh' -exec chmod +x {} +
+      # First-pass run: --no-pull because we just cloned; this also lays down
+      # /usr/local/sbin/{update,airprint-update} for next time.
+      /opt/airprint-v2/scripts/update.sh --no-pull
+    "
+  fi
+
+  ct_ip="$(pct exec "$AIRPRINT_CTID" -- sh -c "ip -4 -o addr show dev eth0 | awk '{print \$4}' | cut -d/ -f1" || true)"
+  printf '\n%s== airprint-v2 update complete ==%s\n' "$C_BOLD" "$C_RESET"
+  printf '  Container ID  : %s\n' "$AIRPRINT_CTID"
+  printf '  Container IP  : %s\n' "${ct_ip:-<unknown>}"
+  printf '\nNext time, you can also just run %supdate%s from inside the LXC shell.\n' "$C_BOLD" "$C_RESET"
+  printf '  pct enter %s\n  update\n\n' "$AIRPRINT_CTID"
+  exit 0
+}
+
+if (( AIRPRINT_UPDATE_ONLY == 1 )); then
+  run_update_only
+fi
+
 # ---- gather config --------------------------------------------------------
 run_host_wizard
 
