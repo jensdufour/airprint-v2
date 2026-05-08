@@ -30,24 +30,60 @@ apt-get update -qq
 apt-get -y -qq upgrade
 
 PKGS=(
-  # core printing
-  cups cups-filters cups-pdf cups-ipp-utils
-  printer-driver-postscript-hp printer-driver-all
-  ghostscript foomatic-db foomatic-db-engine
-  # mDNS
+  # core printing — cups-filters pulls ghostscript, qpdf, poppler, etc. transitively.
+  cups cups-filters cups-ipp-utils
+  # mDNS / Bonjour
   avahi-daemon avahi-utils libnss-mdns
-  # scanning
-  sane sane-utils sane-airscan
+  # scanning (sane-utils gives us scanimage; sane-airscan is the eSCL bridge)
+  sane-utils sane-airscan
   # scan-to-folder fallback
   samba samba-common-bin smbclient
   # housekeeping
-  cron logrotate ufw curl ca-certificates xz-utils tar jq
-  # smoke test deps
-  iputils-ping
+  cron curl ca-certificates
+  # smoke test / diag deps
+  iputils-ping iproute2
 )
 log "installing: ${PKGS[*]}"
 apt-get -y -qq install --no-install-recommends "${PKGS[@]}"
 ok "base packages installed"
+
+# ---- 1b. trim legacy bloat from older installs -----------------------------
+# Earlier versions of this script pulled in printer-driver-all (200+ deps
+# incl. GIMP / GTK / ffmpeg), foomatic-db, cups-pdf, ufw, etc. None of those
+# are needed for a Canon UFR II AirPrint bridge. Purge them if present so
+# `update` slims existing CTs. Skip with AIRPRINT_KEEP_LEGACY=1.
+if [[ "${AIRPRINT_KEEP_LEGACY:-0}" != "1" ]]; then
+  LEGACY_PKGS=(
+    printer-driver-all
+    printer-driver-postscript-hp
+    printer-driver-cups-pdf
+    cups-pdf
+    foomatic-db
+    foomatic-db-engine
+    logrotate
+    xz-utils
+    jq
+    sane
+  )
+  # Don't drop ufw if the user opted in to keep it.
+  if [[ "${AIRPRINT_ENABLE_UFW:-0}" != "1" ]]; then
+    LEGACY_PKGS+=(ufw)
+  fi
+  # Filter to packages actually installed — dpkg -P on a missing package
+  # is fine but noisy. dpkg-query lists exactly what's there.
+  TO_PURGE=()
+  for p in "${LEGACY_PKGS[@]}"; do
+    if dpkg-query -W -f='${db:Status-Status}\n' "$p" 2>/dev/null | grep -q '^installed$'; then
+      TO_PURGE+=("$p")
+    fi
+  done
+  if (( ${#TO_PURGE[@]} > 0 )); then
+    log "purging legacy / no-longer-needed packages: ${TO_PURGE[*]}"
+    apt-get -y -qq purge "${TO_PURGE[@]}" || warn "some purges failed (non-fatal)"
+    apt-get -y -qq autoremove --purge >/dev/null || true
+    ok "legacy packages purged"
+  fi
+fi
 
 # ---- 2. avahi reflector ----------------------------------------------------
 log "applying Avahi reflector config"
@@ -98,11 +134,11 @@ log "configuring scanner (best-effort) + scan-to-folder fallback"
 # UFW is overkill for a single-household airprint LXC behind a home router
 # and frequently breaks LAN access to :631 inside unprivileged LXCs (the
 # container can't fully load nftables/iptables modules, so the deny-by-default
-# policy can leak through in odd ways). Default: disable ufw entirely so the
-# CUPS web UI is reachable from your phone/laptop. Set AIRPRINT_ENABLE_UFW=1
-# to opt back in.
+# policy can leak through in odd ways). Default: not even installed. Set
+# AIRPRINT_ENABLE_UFW=1 to install + configure it.
 if [[ "${AIRPRINT_ENABLE_UFW:-0}" == "1" ]]; then
-  log "applying minimal ufw ruleset (AIRPRINT_ENABLE_UFW=1)"
+  log "installing + applying minimal ufw ruleset (AIRPRINT_ENABLE_UFW=1)"
+  apt-get -y -qq install --no-install-recommends ufw
   ufw --force reset >/dev/null
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
@@ -114,10 +150,7 @@ if [[ "${AIRPRINT_ENABLE_UFW:-0}" == "1" ]]; then
   ufw --force enable >/dev/null
   ok "ufw active"
 else
-  log "disabling ufw (set AIRPRINT_ENABLE_UFW=1 to keep it on)"
-  ufw --force disable >/dev/null 2>&1 || true
-  systemctl disable --now ufw 2>/dev/null || true
-  ok "ufw disabled — CUPS / Samba / mDNS reachable on the LAN"
+  log "ufw not installed (set AIRPRINT_ENABLE_UFW=1 to opt in)"
 fi
 
 # ---- 7b. CUPS reachability check ------------------------------------------

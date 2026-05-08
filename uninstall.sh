@@ -40,21 +40,27 @@ restore_orig /etc/nsswitch.conf
 log "removing Samba scan share data dir (kept by default)"
 warn "leaving /srv/scans in place — remove manually if desired"
 
-log "disabling firewall"
-ufw --force reset >/dev/null 2>&1 || true
-ufw disable      >/dev/null 2>&1 || true
+log "disabling firewall (if installed)"
+if command -v ufw >/dev/null 2>&1; then
+  ufw --force reset >/dev/null 2>&1 || true
+  ufw disable      >/dev/null 2>&1 || true
+fi
 
 systemctl restart avahi-daemon cups smbd nmbd 2>/dev/null || true
 
 if [[ "$PURGE" -eq 1 ]]; then
   log "purging packages installed by airprint-v2"
   DEBIAN_FRONTEND=noninteractive apt-get -y purge \
-    cups cups-filters cups-pdf \
+    cups cups-filters cups-ipp-utils \
     avahi-daemon avahi-utils libnss-mdns \
-    sane sane-utils sane-airscan \
-    samba samba-common-bin \
-    printer-driver-postscript-hp printer-driver-all \
-    foomatic-db foomatic-db-engine || true
+    sane-utils sane-airscan \
+    samba samba-common-bin smbclient \
+    cnrdrvcups-common cnrdrvcups-ufr2-uk cnrdrvcups-ufr2-us \
+    cndrvcups-common cndrvcups-ufr2 \
+    ufw \
+    printer-driver-all printer-driver-postscript-hp printer-driver-cups-pdf \
+    foomatic-db foomatic-db-engine \
+    || true
   apt-get -y autoremove --purge || true
 fi
 
