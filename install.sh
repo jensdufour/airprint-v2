@@ -94,18 +94,48 @@ log "configuring scanner (best-effort) + scan-to-folder fallback"
 "$ROOT/scripts/add-scanner.sh"   || warn "scanner setup did not complete; SMB fallback will still work"
 "$ROOT/scripts/add-scan-share.sh"
 
-# ---- 7. firewall -----------------------------------------------------------
-log "applying minimal ufw ruleset"
-ufw --force reset >/dev/null
-ufw default deny incoming >/dev/null
-ufw default allow outgoing >/dev/null
-ufw allow 631/tcp comment 'IPP / AirPrint'      >/dev/null
-ufw allow 5353/udp comment 'mDNS / Bonjour'     >/dev/null
-ufw allow 137,138/udp comment 'NetBIOS (Samba)' >/dev/null
-ufw allow 139,445/tcp comment 'SMB (scan share)' >/dev/null
-ufw allow 22/tcp comment 'ssh'                  >/dev/null
-ufw --force enable >/dev/null
-ok "ufw active"
+# ---- 7. firewall (opt-in) --------------------------------------------------
+# UFW is overkill for a single-household airprint LXC behind a home router
+# and frequently breaks LAN access to :631 inside unprivileged LXCs (the
+# container can't fully load nftables/iptables modules, so the deny-by-default
+# policy can leak through in odd ways). Default: disable ufw entirely so the
+# CUPS web UI is reachable from your phone/laptop. Set AIRPRINT_ENABLE_UFW=1
+# to opt back in.
+if [[ "${AIRPRINT_ENABLE_UFW:-0}" == "1" ]]; then
+  log "applying minimal ufw ruleset (AIRPRINT_ENABLE_UFW=1)"
+  ufw --force reset >/dev/null
+  ufw default deny incoming >/dev/null
+  ufw default allow outgoing >/dev/null
+  ufw allow 631/tcp comment 'IPP / AirPrint'      >/dev/null
+  ufw allow 5353/udp comment 'mDNS / Bonjour'     >/dev/null
+  ufw allow 137,138/udp comment 'NetBIOS (Samba)' >/dev/null
+  ufw allow 139,445/tcp comment 'SMB (scan share)' >/dev/null
+  ufw allow 22/tcp comment 'ssh'                  >/dev/null
+  ufw --force enable >/dev/null
+  ok "ufw active"
+else
+  log "disabling ufw (set AIRPRINT_ENABLE_UFW=1 to keep it on)"
+  ufw --force disable >/dev/null 2>&1 || true
+  systemctl disable --now ufw 2>/dev/null || true
+  ok "ufw disabled — CUPS / Samba / mDNS reachable on the LAN"
+fi
+
+# ---- 7b. CUPS reachability check ------------------------------------------
+# After cups+ufw are settled, verify the daemon is actually bound to *:631 and
+# answering HTTP. This catches misconfigurations early rather than letting the
+# user discover them by hitting a dead URL.
+log "verifying CUPS web UI is reachable on http://localhost:631/"
+if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE '(^|:)\*?:?631$|0\.0\.0\.0:631$'; then
+  ok "cupsd is listening on *:631"
+else
+  warn "cupsd is NOT listening on *:631 — check /etc/cups/cupsd.conf"
+  ss -ltn 2>/dev/null | sed 's/^/    /'
+fi
+if curl -fsSI --max-time 4 http://localhost:631/ >/dev/null 2>&1; then
+  ok "http://localhost:631/ responds"
+else
+  warn "http://localhost:631/ did NOT respond — see 'journalctl -u cups -n 30'"
+fi
 
 # ---- 8. healthcheck cron ---------------------------------------------------
 log "installing healthcheck cron"
@@ -156,7 +186,7 @@ printf '  hostname  : %s\n'   "$(hostname)"
 printf '  ip        : %s\n'   "${ip4:-<unknown>}"
 printf '  queue     : %s\n'   "$AIRPRINT_QUEUE_NAME"
 printf '  IPP URL   : ipp://%s:631/printers/%s\n' "${ip4:-<host>}" "$AIRPRINT_QUEUE_NAME"
-printf '  CUPS web  : https://%s:631/\n' "${ip4:-<host>}"
+printf '  CUPS web  : http://%s:631/\n' "${ip4:-<host>}"
 printf '  scan SMB  : \\\\%s\\%s\n' "${ip4:-<host>}" "$AIRPRINT_SCAN_SHARE"
 printf '\nTo refresh in the future, run %supdate%s from inside this container.\n' "$C_BOLD" "$C_RESET"
 printf 'Use the helper scripts under /opt/airprint-v2/scripts/ to re-run any step.\n'

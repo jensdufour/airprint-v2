@@ -307,7 +307,7 @@ else
 fi
 printf '  Queue name    : %s\n'   "$AIRPRINT_QUEUE_NAME"
 printf '  IPP URL       : ipp://%s:631/printers/%s\n' "${ct_ip:-<host>}" "$AIRPRINT_QUEUE_NAME"
-printf '  CUPS web UI   : https://%s:631/\n' "${ct_ip:-<host>}"
+printf '  CUPS web UI   : http://%s:631/\n' "${ct_ip:-<host>}"
 printf '  Scan share    : \\\\%s\\scans  (guest-writable, see Samba notes)\n' "${ct_ip:-<host>}"
 printf '\nThe printer should now appear on iOS, macOS, and Windows 11 via Bonjour.\n'
 printf 'Run the smoke test inside the container to verify everything end-to-end:\n'
