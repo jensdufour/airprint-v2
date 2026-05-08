@@ -121,12 +121,14 @@ run_update_only() {
 
   if pct exec "$AIRPRINT_CTID" -- test -x /usr/local/sbin/airprint-update 2>/dev/null; then
     log "airprint-update is already installed inside CT — running it"
-    pct exec "$AIRPRINT_CTID" -- /usr/local/sbin/airprint-update --branch "$AIRPRINT_REPO_BRANCH"
+    pct exec "$AIRPRINT_CTID" -- env LANG=C.UTF-8 LC_ALL=C.UTF-8 LANGUAGE= \
+      /usr/local/sbin/airprint-update --branch "$AIRPRINT_REPO_BRANCH"
   else
     log "airprint-update not present (older install) — bootstrapping the new updater"
     pct exec "$AIRPRINT_CTID" -- bash -c "
       set -e
       export DEBIAN_FRONTEND=noninteractive
+      export LANG=C.UTF-8 LC_ALL=C.UTF-8 LANGUAGE=
       apt-get update -qq
       apt-get install -y --no-install-recommends git ca-certificates curl >/dev/null
       rm -rf /opt/airprint-v2
@@ -262,6 +264,7 @@ ok "container network is up"
 log "installing repo into /opt/airprint-v2 inside the container"
 pct exec "$AIRPRINT_CTID" -- sh -c '
   set -e
+  export LANG=C.UTF-8 LC_ALL=C.UTF-8 LANGUAGE=
   apt-get update -qq
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git ca-certificates curl >/dev/null
 '
@@ -288,6 +291,7 @@ ok "repo in place"
 # ---- run the in-container installer ---------------------------------------
 log "running /opt/airprint-v2/install.sh inside the container"
 pct exec "$AIRPRINT_CTID" -- env \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 LANGUAGE= \
   AIRPRINT_PRINTER_IP="$AIRPRINT_PRINTER_IP" \
   AIRPRINT_PRINTER_MODEL="$AIRPRINT_PRINTER_MODEL" \
   AIRPRINT_QUEUE_NAME="$AIRPRINT_QUEUE_NAME" \

@@ -17,6 +17,13 @@ require_root
 : "${AIRPRINT_SCAN_SHARE:=scans}"
 
 export DEBIAN_FRONTEND=noninteractive
+# Force a locale that's guaranteed to exist on a fresh Debian 12 LXC. The host
+# `pct exec` inherits LANG=en_US.UTF-8 from the Proxmox shell, but the CT only
+# has C.UTF-8 generated, so without this every apt step prints a wall of
+# "locale: Cannot set LC_CTYPE to default locale" warnings.
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+export LANGUAGE=
 
 log "airprint-v2 installer starting (printer=$AIRPRINT_PRINTER_MODEL @ $AIRPRINT_PRINTER_IP, queue=$AIRPRINT_QUEUE_NAME)"
 
