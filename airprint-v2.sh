@@ -63,7 +63,8 @@ run_host_wizard
 ensure_template() {
   local store="$AIRPRINT_TPL_STORAGE" tpl
   log "looking for a Debian 12 LXC template on '$store'…"
-  tpl="$(pveam list "$store" 2>/dev/null | awk '/debian-12.*standard.*\.tar\.(zst|gz|xz)$/ {print $1}' | head -n1)"
+  # Use awk's exit, not `| head -n1`, to avoid SIGPIPE on the producer.
+  tpl="$(pveam list "$store" 2>/dev/null | awk '/debian-12.*standard.*\.tar\.(zst|gz|xz)$/ {print $1; exit}')"
   if [[ -n "$tpl" ]]; then
     AIRPRINT_TEMPLATE_REF="$tpl"
     ok "found template: $AIRPRINT_TEMPLATE_REF"
@@ -97,7 +98,13 @@ build_net_arg() {
 
 generate_root_password() {
   # 24 chars, no shell-hostile bytes.
-  tr -dc 'A-Za-z0-9_=+-' </dev/urandom | head -c 24
+  # Read a fixed-size chunk of /dev/urandom *first*, THEN filter — this avoids
+  # the classic `tr ... < /dev/urandom | head -c N` SIGPIPE-141 trap when the
+  # script runs under `set -o pipefail` (head closes the pipe before tr is
+  # done draining the infinite random source).
+  local raw
+  raw="$(head -c 512 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9_=+-')"
+  printf '%s' "${raw:0:24}"
 }
 
 if [[ -z "${AIRPRINT_ROOT_PW:-}" ]]; then

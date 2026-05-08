@@ -56,9 +56,10 @@ log "extracting Canon driver tarball"
 tar -xf "$TARBALL" -C "$WORKDIR"
 
 # Find a Debian package directory inside the tree.
-DEB_DIR="$(find "$WORKDIR" -type d -iname 'Debian' | head -n1)"
+# `-print -quit` stops `find` after the first match without SIGPIPE.
+DEB_DIR="$(find "$WORKDIR" -type d -iname 'Debian' -print -quit)"
 if [[ -z "$DEB_DIR" ]]; then
-  DEB_DIR="$(find "$WORKDIR" -type d \( -iname '*deb*' -o -iname 'amd64' \) | head -n1)"
+  DEB_DIR="$(find "$WORKDIR" -type d \( -iname '*deb*' -o -iname 'amd64' \) -print -quit)"
 fi
 if [[ -z "$DEB_DIR" ]]; then
   # Maybe the .debs are scattered.
@@ -70,7 +71,8 @@ mapfile -t DEBS < <(find "$DEB_DIR" -maxdepth 3 -type f -name '*.deb' \
 if (( ${#DEBS[@]} == 0 )); then
   warn "no cndrvcups-* .deb packages found inside the tarball"
   warn "tarball contents (top 50 entries):"
-  find "$WORKDIR" -maxdepth 4 | head -n 50 | sed 's/^/    /'
+  # Diagnostic only — `|| true` keeps SIGPIPE from killing the script.
+  { find "$WORKDIR" -maxdepth 4 | awk 'NR<=50 {print "    " $0}'; } || true
   warn "falling back to generic PPD"
   exit 0
 fi
