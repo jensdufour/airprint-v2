@@ -94,6 +94,30 @@ cupsenable "$AIRPRINT_QUEUE_NAME"
 cupsaccept "$AIRPRINT_QUEUE_NAME"
 lpadmin -d "$AIRPRINT_QUEUE_NAME"
 
+# ---- sensible queue defaults ----------------------------------------------
+# These are the *defaults* that systems honoring PPD defaults (Windows,
+# CUPS-direct from a Mac, lp on Linux) will pick up. iOS / macOS print
+# sheets always let the user override anything, so this only changes the
+# fallback for non-iOS clients.
+#
+# We try each option but ignore failures — not every PPD exposes every key,
+# and a missing key is not a real error (e.g. a generic PostScript fallback
+# has no Duplex). lpadmin prints a single-line warning to stderr and we
+# already log everything via the ERR trap, so a 2>/dev/null is enough.
+set_default() {
+  local opt="$1"
+  if lpadmin -p "$AIRPRINT_QUEUE_NAME" -o "$opt" 2>/dev/null; then
+    log "  set default: $opt"
+  fi
+}
+log "applying queue defaults (duplex, A4, plain, normal quality)"
+set_default 'Duplex=DuplexNoTumble'      # two-sided long-edge
+set_default 'sides-default=two-sided-long-edge'
+set_default 'PageSize=A4'
+set_default 'media-default=iso_a4_210x297mm'
+set_default 'MediaType=Plain'
+set_default 'cupsPrintQuality=Normal'
+
 # Patch the generated PPD with SNMP / IPP-supplies hints — but ONLY if missing
 # and ONLY for inert, well-supported attributes. We deliberately do NOT touch
 # *cupsURF here unless explicitly asked: declaring URF capabilities the filter
