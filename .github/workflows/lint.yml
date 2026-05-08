@@ -25,27 +25,3 @@ jobs:
           files=( airprint-v2.sh install.sh uninstall.sh lib/*.sh scripts/*.sh )
           echo "Linting:"; printf '  %s\n' "${files[@]}"
           shellcheck --severity=style "${files[@]}"
-
-  shfmt-check:
-    name: shfmt (formatting)
-    runs-on: ubuntu-latest
-    # Advisory only — does not gate the merge.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: install shfmt
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq shfmt jq || true
-          if ! command -v shfmt >/dev/null 2>&1; then
-            tag="$(curl -fsSL https://api.github.com/repos/mvdan/sh/releases/latest | jq -r .tag_name)"
-            curl -fsSL -o /tmp/shfmt \
-              "https://github.com/mvdan/sh/releases/download/${tag}/shfmt_${tag}_linux_amd64"
-            sudo install -m 0755 /tmp/shfmt /usr/local/bin/shfmt
-          fi
-          shfmt --version
-
-      - name: run shfmt
-        run: |
-          shfmt -d -i 2 -ci -bn airprint-v2.sh install.sh uninstall.sh lib/*.sh scripts/*.sh

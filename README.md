@@ -78,7 +78,7 @@ airprint-v2/
 ├── install.sh                 # Runs INSIDE the LXC
 ├── uninstall.sh               # Tear-down helper (in-container)
 ├── Makefile                   # `make lint` (shellcheck) before pushing
-├── .github/workflows/lint.yml # CI: shellcheck + shfmt
+├── .github/workflows/lint.yml # CI: shellcheck
 ├── lib/
 │   ├── common.sh              # logging / colors / error trap (sourced both sides)
 │   └── host_prompts.sh        # interactive prompts (host side)
@@ -204,7 +204,7 @@ make lint     # shellcheck, severity=style
 ```
 
 CI (`.github/workflows/lint.yml`) runs the same shellcheck on every push
-and PR, plus shfmt formatting checks (advisory).
+and PR.
 
 ---
 
