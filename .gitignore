@@ -1,0 +1,22 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+*.code-workspace
+
+# Local test artefacts
+*.log
+*.bak
+*.orig
+
+# Driver tarballs (large, license-restricted; DO NOT commit)
+drivers/*
+!drivers/README.md
+!drivers/.gitkeep
+
+# Temp/scratch
+tmp/
+scratch/

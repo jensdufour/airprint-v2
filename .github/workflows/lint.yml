@@ -1,0 +1,41 @@
+name: lint
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+
+      - name: run shellcheck
+        run: |
+          shopt -s globstar nullglob
+          files=( airprint-v2.sh install.sh uninstall.sh lib/*.sh scripts/*.sh )
+          echo "Linting:"; printf '  %s\n' "${files[@]}"
+          shellcheck --severity=style "${files[@]}"
+
+  shfmt-check:
+    name: shfmt (formatting)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: install shfmt
+        run: |
+          curl -fsSL -o /tmp/shfmt https://github.com/mvdan/sh/releases/latest/download/shfmt_v3.8.0_linux_amd64
+          chmod +x /tmp/shfmt
+      - name: run shfmt
+        run: |
+          /tmp/shfmt -d -i 2 -ci -bn airprint-v2.sh install.sh uninstall.sh lib/*.sh scripts/*.sh
